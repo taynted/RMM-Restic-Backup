@@ -1,0 +1,95 @@
+# Scripts adapted from https://github.com/kmwoley/restic-windows-backup and installs restic browser for GUI restores https://github.com/emuell/restic-browser
+
+param(
+    [string] $AWSBucket,
+    [string] $AWSKey,
+    [string] $AWSSecret,
+    [string] $AWSRepoKey
+)
+
+$hostname = hostname
+
+# restic backup repository configuration
+$Env:AWS_ACCESS_KEY_ID=$AWSKey
+$Env:AWS_SECRET_ACCESS_KEY=$AWSSecret
+$Env:RESTIC_REPOSITORY=$AWSBucket + $hostname
+$Env:RESTIC_PASSWORD=$AWSRepoKey
+
+############### START CONFIG ###############
+
+# backup configuration
+$ExeName = "restic.exe"
+$InstallPath = "C:\backup\restic"
+$ResticExe = Join-Path $InstallPath $ExeName
+$StateFile = Join-Path $InstallPath "state.xml"
+$WindowsExcludeFile = Join-Path $InstallPath "windows.exclude"
+$LocalExcludeFile = Join-Path $InstallPath "local.exclude"
+$LogPath = Join-Path $InstallPath "logs"
+$LogRetentionDays = 30
+$InternetTestAttempts = 10
+$GlobalRetryAttempts = 4
+$IgnoreMissingBackupSources = $false
+$AdditionalBackupParameters = @("--exclude-if-present", ".nobackup")
+
+
+############### END CONFIG ###############
+
+# download restic
+New-Item c:\isquared\restic -type directory
+if(-not (Test-Path $ResticExe)) {
+    $url = $null
+    if([Environment]::Is64BitOperatingSystem){
+        $url = "https://github.com/restic/restic/releases/download/v0.15.0/restic_0.15.0_windows_amd64.zip"
+    }
+    else {
+        $url = "https://github.com/restic/restic/releases/download/v0.15.0/restic_0.15.0_windows_386.zip"
+    }
+    $output = Join-Path $InstallPath "restic.zip"
+    Invoke-WebRequest -Uri $url -OutFile $output
+    Start-Sleep -Seconds 15
+    Expand-Archive -LiteralPath $output $InstallPath
+    Remove-Item $output
+    Get-ChildItem -Path $InstallPath *.exe | Rename-Item -NewName $ExeName
+}
+
+# Invoke restic self-update to check for a newer version
+& $ResticExe self-update
+
+# Create log directory if it doesn't exit
+if(-not (Test-Path $LogPath)) {
+    New-Item -ItemType Directory -Force -Path $LogPath | Out-Null
+    Write-Output "[[Init]] Repository successfully initialized."
+}
+
+# Create the local exclude file
+if(-not (Test-Path $LocalExcludeFile)) {
+#    New-Item -Type File -Path $LocalExcludeFile | Out-Null
+    $url = "https://raw.githubusercontent.com/kmwoley/restic-windows-backup/main/windows.exclude"
+    Invoke-WebRequest -Uri $url -OutFile $WindowsExcludeFile
+}
+
+# Initialize the restic repository
+& $ResticExe --verbose init 
+if($?) {
+    Write-Output "[[Init]] Repository successfully initialized."
+}
+else {
+    Write-Warning "[[Init]] Repository initialization failed. Check errors and resolve."
+}
+
+# Add restic install path to machine environment variables
+
+$PATH = [Environment]::GetEnvironmentVariable("PATH", "Machine")
+$xampp_path = $InstallPath
+if( $PATH -notlike "*"+$xampp_path+"*" ){
+    [Environment]::SetEnvironmentVariable("PATH", "$PATH;$xampp_path", "Machine")
+}
+
+# Download restic browser to restore files later
+
+$url = "https://github.com/emuell/restic-browser/releases/download/v0.2.5/Restic-Browser-v0.2.5-windows.zip"
+$output = Join-Path $InstallPath "restic-browser.zip"
+Invoke-WebRequest -Uri $url -OutFile $output
+Start-Sleep -Seconds 30
+Expand-Archive -LiteralPath $output $InstallPath
+Remove-Item $output
